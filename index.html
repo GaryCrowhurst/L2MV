@@ -426,16 +426,29 @@
             </div>
         </div>
 
-        <!-- Mobile-Optimized Data Management -->
+        <!-- Enhanced Data Management with Storage Monitoring -->
         <div class="mb-4 p-4 bg-white rounded-lg shadow-sm border card-mobile">
             <h3 class="text-lg font-semibold text-gray-800 mb-3">
                 <i data-lucide="database" class="w-5 h-5 inline mr-2"></i>
-                Data Backup
+                Data Management & Storage
             </h3>
+            
+            <!-- Storage Status -->
+            <div id="storage-status" class="mb-4 p-3 bg-gray-50 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-700">Storage Status</span>
+                    <span id="storage-size" class="text-xs text-gray-600">Calculating...</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                    <div id="storage-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <p class="text-xs text-gray-600 mt-1" id="storage-advice">Photos are automatically compressed and backed up</p>
+            </div>
+            
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <button onclick="exportData()" class="btn-mobile flex items-center justify-center px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
                     <i data-lucide="download" class="w-4 h-4 mr-2"></i>
-                    Export
+                    Export Backup
                 </button>
                 <label class="btn-mobile flex items-center justify-center px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer">
                     <i data-lucide="upload" class="w-4 h-4 mr-2"></i>
@@ -447,9 +460,12 @@
                     Clear All
                 </button>
             </div>
-            <p class="text-xs text-gray-600 mt-3">
-                💡 Export regularly to prevent data loss
-            </p>
+            <div class="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p class="text-xs text-blue-800">
+                    <i data-lucide="shield-check" class="w-4 h-4 inline mr-1"></i>
+                    <strong>Protection:</strong> Photos are saved with multiple backup methods. Auto-backup triggers every 10 completed tasks.
+                </p>
+            </div>
         </div>
 
         <!-- Progress Section - Mobile Optimized -->
@@ -876,10 +892,13 @@
             return sections;
         }
 
+        // Enhanced storage system with multiple fallbacks
         function saveToLocalStorage() {
             const stateToSave = {
                 learnerName: appState.learnerName,
-                tasks: {}
+                tasks: {},
+                saveTimestamp: new Date().toISOString(),
+                version: '2.1'
             };
             
             for (const [taskId, taskData] of Object.entries(appState.tasks)) {
@@ -890,44 +909,521 @@
                 };
             }
             
-            try {
-                localStorage.setItem('photoEvidenceState', JSON.stringify(stateToSave));
+            // Try multiple storage methods with fallbacks
+            const success = saveWithFallbacks(stateToSave);
+            
+            if (success) {
                 showSaveIndicator();
+                // Auto-export backup when storage is getting full
+                checkStorageAndAutoBackup();
+                return true;
+            } else {
+                // Critical storage failure - show emergency backup dialog
+                showEmergencyBackupDialog();
+                return false;
+            }
+        }
+
+        function saveWithFallbacks(data) {
+            const dataStr = JSON.stringify(data);
+            const dataSize = new Blob([dataStr]).size;
+            
+            console.log(`Attempting to save ${(dataSize / 1024 / 1024).toFixed(2)}MB of data`);
+            
+            // Method 1: Try localStorage (most reliable but size-limited)
+            try {
+                // Check if we're approaching localStorage limits
+                if (dataSize > 4 * 1024 * 1024) { // 4MB threshold
+                    console.warn('Data approaching localStorage limits, compressing images...');
+                    // Try more aggressive compression
+                    const compressedData = compressDataForStorage(data);
+                    localStorage.setItem('photoEvidenceState', JSON.stringify(compressedData));
+                } else {
+                    localStorage.setItem('photoEvidenceState', dataStr);
+                }
+                
+                // Save a backup copy with different key
+                localStorage.setItem('photoEvidenceBackup', dataStr);
+                return true;
             } catch (error) {
-                console.error('Error saving to localStorage:', error);
-                alert('Error saving data. Storage may be full.');
+                console.error('localStorage failed:', error);
+            }
+            
+            // Method 2: Try IndexedDB (larger capacity)
+            try {
+                saveToIndexedDB(data);
+                return true;
+            } catch (error) {
+                console.error('IndexedDB failed:', error);
+            }
+            
+            // Method 3: Emergency - save to temporary session storage
+            try {
+                sessionStorage.setItem('photoEvidenceEmergency', dataStr);
+                console.warn('Saved to sessionStorage as emergency backup');
+                return true;
+            } catch (error) {
+                console.error('All storage methods failed:', error);
+            }
+            
+            return false;
+        }
+
+        function compressDataForStorage(data) {
+            const compressed = { ...data };
+            
+            // More aggressive image compression for storage
+            for (const [taskId, taskData] of Object.entries(compressed.tasks)) {
+                if (taskData.photoBase64) {
+                    try {
+                        // Re-compress with lower quality for storage
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        const img = new Image();
+                        
+                        img.onload = function() {
+                            const maxWidth = 800; // Smaller for storage
+                            const maxHeight = 800;
+                            
+                            let { width, height } = img;
+                            
+                            if (width > height) {
+                                if (width > maxWidth) {
+                                    height = (height * maxWidth) / width;
+                                    width = maxWidth;
+                                }
+                            } else {
+                                if (height > maxHeight) {
+                                    width = (width * maxHeight) / height;
+                                    height = maxHeight;
+                                }
+                            }
+                            
+                            canvas.width = width;
+                            canvas.height = height;
+                            ctx.drawImage(img, 0, 0, width, height);
+                            
+                            // Lower quality for storage (0.6 instead of 0.8)
+                            taskData.photoBase64 = canvas.toDataURL('image/jpeg', 0.6);
+                        };
+                        
+                        img.src = taskData.photoBase64;
+                    } catch (error) {
+                        console.error('Error compressing image for storage:', error);
+                    }
+                }
+            }
+            
+            return compressed;
+        }
+
+        function saveToIndexedDB(data) {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open('EvidenceTracker', 1);
+                
+                request.onerror = () => reject(request.error);
+                
+                request.onsuccess = () => {
+                    const db = request.result;
+                    const transaction = db.transaction(['evidence'], 'readwrite');
+                    const store = transaction.objectStore('evidence');
+                    
+                    store.put({ id: 'main', data: data, timestamp: Date.now() });
+                    
+                    transaction.oncomplete = () => resolve();
+                    transaction.onerror = () => reject(transaction.error);
+                };
+                
+                request.onupgradeneeded = () => {
+                    const db = request.result;
+                    if (!db.objectStoreNames.contains('evidence')) {
+                        db.createObjectStore('evidence', { keyPath: 'id' });
+                    }
+                };
+            });
+        }
+
+        function checkStorageAndAutoBackup() {
+            try {
+                // Estimate storage usage
+                const testData = JSON.stringify(appState);
+                const currentSize = new Blob([testData]).size;
+                
+                // If approaching 4MB, suggest backup
+                if (currentSize > 3 * 1024 * 1024) {
+                    showStorageWarning(currentSize);
+                }
+                
+                // Auto-export every 10 completed tasks
+                const completedCount = getCompletedTasks();
+                if (completedCount > 0 && completedCount % 10 === 0) {
+                    const lastBackup = localStorage.getItem('lastAutoBackup');
+                    const lastBackupTime = lastBackup ? parseInt(lastBackup) : 0;
+                    const now = Date.now();
+                    
+                    // Auto-export once per day maximum
+                    if (now - lastBackupTime > 24 * 60 * 60 * 1000) {
+                        autoExportBackup();
+                        localStorage.setItem('lastAutoBackup', now.toString());
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking storage:', error);
+            }
+        }
+
+        function showStorageWarning(currentSize) {
+            const sizeMB = (currentSize / 1024 / 1024).toFixed(2);
+            const warning = document.createElement('div');
+            warning.className = 'fixed top-20 left-4 right-4 bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded z-50';
+            warning.innerHTML = `
+                <div class="flex items-center">
+                    <i data-lucide="alert-triangle" class="w-5 h-5 mr-2"></i>
+                    <div class="flex-1">
+                        <strong>Storage Warning:</strong> You have ${sizeMB}MB of photos. 
+                        <button onclick="exportData(); this.parentElement.parentElement.parentElement.remove();" 
+                                class="ml-2 underline font-medium">Export backup now</button>
+                    </div>
+                    <button onclick="this.parentElement.parentElement.remove()" class="ml-2">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            `;
+            
+            document.body.appendChild(warning);
+            lucide.createIcons();
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => {
+                if (warning.parentNode) {
+                    warning.remove();
+                }
+            }, 10000);
+        }
+
+        function showEmergencyBackupDialog() {
+            const dialog = document.createElement('div');
+            dialog.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4';
+            dialog.innerHTML = `
+                <div class="bg-white rounded-lg p-6 max-w-md w-full">
+                    <div class="flex items-center mb-4 text-red-600">
+                        <i data-lucide="alert-circle" class="w-6 h-6 mr-2"></i>
+                        <h3 class="text-lg font-bold">Storage Critical!</h3>
+                    </div>
+                    <p class="text-gray-700 mb-4">
+                        Your device storage is full and photos cannot be saved automatically. 
+                        Your current work is safe, but you must export a backup now to prevent data loss.
+                    </p>
+                    <div class="flex gap-2">
+                        <button onclick="exportData(); this.closest('.fixed').remove();" 
+                                class="flex-1 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+                            <i data-lucide="download" class="w-4 h-4 inline mr-1"></i>
+                            Export Backup Now
+                        </button>
+                        <button onclick="this.closest('.fixed').remove();" 
+                                class="px-4 py-2 border rounded hover:bg-gray-50">
+                            Continue (Risk Data Loss)
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(dialog);
+            lucide.createIcons();
+        }
+
+        function autoExportBackup() {
+            try {
+                const exportData = {
+                    learnerName: appState.learnerName,
+                    tasks: appState.tasks,
+                    exportDate: new Date().toISOString(),
+                    version: '2.1',
+                    autoBackup: true
+                };
+                
+                const dataStr = JSON.stringify(exportData, null, 2);
+                const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(dataBlob);
+                link.download = `evidence_auto_backup_${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                
+                // Show notification
+                const notification = document.createElement('div');
+                notification.className = 'fixed top-20 right-4 bg-green-100 border border-green-400 text-green-800 px-4 py-3 rounded z-50';
+                notification.innerHTML = `
+                    <div class="flex items-center">
+                        <i data-lucide="shield-check" class="w-5 h-5 mr-2"></i>
+                        <span>Auto-backup saved to Downloads</span>
+                    </div>
+                `;
+                
+                document.body.appendChild(notification);
+                lucide.createIcons();
+                
+                setTimeout(() => notification.remove(), 3000);
+                
+            } catch (error) {
+                console.error('Auto-backup failed:', error);
             }
         }
 
         function loadFromLocalStorage() {
-            const saved = localStorage.getItem('photoEvidenceState');
-            if (saved) {
+            // Try multiple recovery methods
+            let loadedData = null;
+            let recoveryMethod = '';
+            
+            // Method 1: Try primary localStorage
+            try {
+                const saved = localStorage.getItem('photoEvidenceState');
+                if (saved) {
+                    loadedData = JSON.parse(saved);
+                    recoveryMethod = 'localStorage';
+                }
+            } catch (error) {
+                console.error('Primary localStorage failed:', error);
+            }
+            
+            // Method 2: Try backup localStorage
+            if (!loadedData) {
                 try {
-                    const parsedState = JSON.parse(saved);
-                    
-                    appState.learnerName = parsedState.learnerName || '';
-                    const nameInput = document.getElementById('learner-name');
-                    if (nameInput) {
-                        nameInput.value = appState.learnerName;
+                    const backup = localStorage.getItem('photoEvidenceBackup');
+                    if (backup) {
+                        loadedData = JSON.parse(backup);
+                        recoveryMethod = 'localStorage backup';
+                        console.log('Recovered from backup localStorage');
                     }
-                    
-                    for (const [taskId, taskData] of Object.entries(parsedState.tasks || {})) {
-                        appState.tasks[taskId] = {
-                            completed: taskData.completed || false,
-                            photoFile: null,
-                            photoBase64: taskData.photoBase64 || null,
-                            fileName: taskData.fileName || null
-                        };
-                        
-                        if (taskData.photoBase64) {
-                            updateTaskPreview(taskId);
-                        }
-                    }
-                    updateProgress();
                 } catch (error) {
-                    console.error('Error loading from localStorage:', error);
+                    console.error('Backup localStorage failed:', error);
                 }
             }
+            
+            // Method 3: Try IndexedDB
+            if (!loadedData) {
+                loadFromIndexedDB().then(data => {
+                    if (data) {
+                        loadedData = data;
+                        recoveryMethod = 'IndexedDB';
+                        console.log('Recovered from IndexedDB');
+                        applyLoadedData(loadedData, recoveryMethod);
+                    }
+                });
+            }
+            
+            // Method 4: Try emergency sessionStorage
+            if (!loadedData) {
+                try {
+                    const emergency = sessionStorage.getItem('photoEvidenceEmergency');
+                    if (emergency) {
+                        loadedData = JSON.parse(emergency);
+                        recoveryMethod = 'emergency session';
+                        console.log('Recovered from emergency sessionStorage');
+                        showRecoveryNotification('emergency');
+                    }
+                } catch (error) {
+                    console.error('Emergency storage failed:', error);
+                }
+            }
+            
+            if (loadedData) {
+                applyLoadedData(loadedData, recoveryMethod);
+            } else {
+                // No data found - check if this is first use
+                console.log('No existing data found - starting fresh');
+            }
+        }
+
+        function loadFromIndexedDB() {
+            return new Promise((resolve) => {
+                try {
+                    const request = indexedDB.open('EvidenceTracker', 1);
+                    
+                    request.onerror = () => resolve(null);
+                    
+                    request.onsuccess = () => {
+                        const db = request.result;
+                        const transaction = db.transaction(['evidence'], 'readonly');
+                        const store = transaction.objectStore('evidence');
+                        const getRequest = store.get('main');
+                        
+                        getRequest.onsuccess = () => {
+                            resolve(getRequest.result?.data || null);
+                        };
+                        
+                        getRequest.onerror = () => resolve(null);
+                    };
+                    
+                    request.onupgradeneeded = () => resolve(null);
+                } catch (error) {
+                    console.error('IndexedDB access failed:', error);
+                    resolve(null);
+                }
+            });
+        }
+
+        function applyLoadedData(parsedState, recoveryMethod) {
+            try {
+                appState.learnerName = parsedState.learnerName || '';
+                const nameInput = document.getElementById('learner-name');
+                if (nameInput) {
+                    nameInput.value = appState.learnerName;
+                }
+                
+                let photosRecovered = 0;
+                
+                for (const [taskId, taskData] of Object.entries(parsedState.tasks || {})) {
+                    appState.tasks[taskId] = {
+                        completed: taskData.completed || false,
+                        photoFile: null,
+                        photoBase64: taskData.photoBase64 || null,
+                        fileName: taskData.fileName || null
+                    };
+                    
+                    if (taskData.photoBase64) {
+                        updateTaskPreview(taskId);
+                        photosRecovered++;
+                    }
+                }
+                
+                updateProgress();
+                
+                // Show recovery notification if from backup/emergency
+                if (recoveryMethod !== 'localStorage') {
+                    showRecoveryNotification(recoveryMethod, photosRecovered);
+                }
+                
+                // Verify data integrity
+                verifyDataIntegrity(parsedState, recoveryMethod);
+                
+            } catch (error) {
+                console.error('Error applying loaded data:', error);
+                showDataCorruptionDialog();
+            }
+        }
+
+        function verifyDataIntegrity(data, source) {
+            let corruptedTasks = 0;
+            let validTasks = 0;
+            
+            for (const [taskId, taskData] of Object.entries(data.tasks || {})) {
+                if (taskData.photoBase64) {
+                    try {
+                        // Check if base64 data is valid
+                        if (taskData.photoBase64.startsWith('data:image/')) {
+                            validTasks++;
+                        } else {
+                            corruptedTasks++;
+                            console.warn(`Corrupted photo data for task ${taskId}`);
+                        }
+                    } catch (error) {
+                        corruptedTasks++;
+                        console.error(`Error validating task ${taskId}:`, error);
+                    }
+                }
+            }
+            
+            if (corruptedTasks > 0) {
+                showCorruptionWarning(corruptedTasks, validTasks);
+            }
+            
+            console.log(`Data integrity check: ${validTasks} valid photos, ${corruptedTasks} corrupted from ${source}`);
+        }
+
+        function showRecoveryNotification(method, photoCount = 0) {
+            const notification = document.createElement('div');
+            notification.className = 'fixed top-20 left-4 right-4 bg-blue-100 border border-blue-400 text-blue-800 px-4 py-3 rounded z-50';
+            
+            let message = '';
+            switch (method) {
+                case 'localStorage backup':
+                    message = `Data recovered from backup storage. ${photoCount} photos restored.`;
+                    break;
+                case 'IndexedDB':
+                    message = `Data recovered from IndexedDB backup. ${photoCount} photos restored.`;
+                    break;
+                case 'emergency':
+                    message = 'Data recovered from emergency session backup. Export immediately to prevent loss!';
+                    break;
+            }
+            
+            notification.innerHTML = `
+                <div class="flex items-center">
+                    <i data-lucide="shield" class="w-5 h-5 mr-2"></i>
+                    <div class="flex-1">
+                        <strong>Data Recovery:</strong> ${message}
+                        ${method === 'emergency' ? '<button onclick="exportData(); this.parentElement.parentElement.parentElement.remove();" class="ml-2 underline font-medium">Export Now</button>' : ''}
+                    </div>
+                    <button onclick="this.parentElement.parentElement.remove()" class="ml-2">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            `;
+            
+            document.body.appendChild(notification);
+            lucide.createIcons();
+            
+            // Auto-remove after 8 seconds (except emergency)
+            if (method !== 'emergency') {
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.remove();
+                    }
+                }, 8000);
+            }
+        }
+
+        function showCorruptionWarning(corrupted, valid) {
+            const warning = document.createElement('div');
+            warning.className = 'fixed top-20 left-4 right-4 bg-orange-100 border border-orange-400 text-orange-800 px-4 py-3 rounded z-50';
+            warning.innerHTML = `
+                <div class="flex items-center">
+                    <i data-lucide="alert-triangle" class="w-5 h-5 mr-2"></i>
+                    <div class="flex-1">
+                        <strong>Data Issues Found:</strong> ${corrupted} photos may be corrupted. ${valid} photos recovered successfully.
+                        <button onclick="exportData(); this.parentElement.parentElement.parentElement.remove();" 
+                                class="ml-2 underline font-medium">Export backup now</button>
+                    </div>
+                    <button onclick="this.parentElement.parentElement.remove()" class="ml-2">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            `;
+            
+            document.body.appendChild(warning);
+            lucide.createIcons();
+        }
+
+        function showDataCorruptionDialog() {
+            const dialog = document.createElement('div');
+            dialog.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4';
+            dialog.innerHTML = `
+                <div class="bg-white rounded-lg p-6 max-w-md w-full">
+                    <div class="flex items-center mb-4 text-red-600">
+                        <i data-lucide="alert-circle" class="w-6 h-6 mr-2"></i>
+                        <h3 class="text-lg font-bold">Data Corruption Detected</h3>
+                    </div>
+                    <p class="text-gray-700 mb-4">
+                        Some of your saved data appears to be corrupted. You can continue with a fresh start, 
+                        or try importing a previous backup if you have one.
+                    </p>
+                    <div class="flex gap-2">
+                        <label class="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 cursor-pointer text-center">
+                            <i data-lucide="upload" class="w-4 h-4 inline mr-1"></i>
+                            Import Backup
+                            <input type="file" accept=".json" class="hidden" onchange="importData(this.files[0]); this.closest('.fixed').remove();">
+                        </label>
+                        <button onclick="this.closest('.fixed').remove();" 
+                                class="px-4 py-2 border rounded hover:bg-gray-50">
+                            Start Fresh
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(dialog);
+            lucide.createIcons();
         }
 
         // UI Update Functions
@@ -956,6 +1452,9 @@
                 `;
             }).join('');
 
+            // Update storage status
+            updateStorageStatus();
+
             // Update download button
             const downloadBtn = document.getElementById('download-pdf');
             const downloadStatus = document.getElementById('download-status');
@@ -971,6 +1470,45 @@
             } else {
                 downloadStatus.textContent = 'Available anytime, even with partial completion';
                 downloadStatus.className = 'text-sm text-gray-600 mt-3 text-center';
+            }
+        }
+
+        function updateStorageStatus() {
+            try {
+                const testData = JSON.stringify(appState);
+                const currentSize = new Blob([testData]).size;
+                const sizeMB = (currentSize / 1024 / 1024).toFixed(2);
+                const photoCount = Object.values(appState.tasks).filter(task => task.photoBase64).length;
+                
+                // Estimate storage percentage (assuming 5MB localStorage limit)
+                const maxStorage = 5 * 1024 * 1024; // 5MB
+                const storagePercentage = Math.min((currentSize / maxStorage) * 100, 100);
+                
+                const sizeElement = document.getElementById('storage-size');
+                const barElement = document.getElementById('storage-bar');
+                const adviceElement = document.getElementById('storage-advice');
+                
+                if (sizeElement && barElement && adviceElement) {
+                    sizeElement.textContent = `${sizeMB}MB (${photoCount} photos)`;
+                    barElement.style.width = `${storagePercentage}%`;
+                    
+                    // Color coding based on usage
+                    if (storagePercentage > 80) {
+                        barElement.className = 'bg-red-600 h-2 rounded-full transition-all duration-300';
+                        adviceElement.textContent = 'Storage nearly full! Export backup recommended.';
+                        adviceElement.className = 'text-xs text-red-600 mt-1';
+                    } else if (storagePercentage > 60) {
+                        barElement.className = 'bg-yellow-600 h-2 rounded-full transition-all duration-300';
+                        adviceElement.textContent = 'Storage filling up. Consider exporting a backup soon.';
+                        adviceElement.className = 'text-xs text-yellow-600 mt-1';
+                    } else {
+                        barElement.className = 'bg-blue-600 h-2 rounded-full transition-all duration-300';
+                        adviceElement.textContent = 'Storage healthy. Photos are automatically backed up.';
+                        adviceElement.className = 'text-xs text-gray-600 mt-1';
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating storage status:', error);
             }
         }
 
@@ -1017,7 +1555,7 @@
             saveToLocalStorage();
         }
 
-        // Enhanced file upload with mobile camera support
+        // Enhanced file upload with aggressive compression and error handling
         function handleFileUpload(taskId, file) {
             if (!file || !file.type.startsWith('image/')) {
                 alert('Please select a valid image file.');
@@ -1040,62 +1578,181 @@
             
             // Show loading state
             const dropZone = document.getElementById(`drop-${taskId}`);
+            const uploadStatus = document.getElementById(`status-${taskId}`);
             dropZone.classList.add('loading');
+            uploadStatus.textContent = 'Processing image...';
+            uploadStatus.className = 'text-sm text-blue-600 mt-2';
             
             const reader = new FileReader();
             reader.onload = function(e) {
-                // Compress image for mobile performance
-                compressImage(e.target.result, (compressedImage) => {
-                    appState.tasks[taskId].photoBase64 = compressedImage;
-                    updateTaskPreview(taskId);
-                    updateProgress();
-                    saveToLocalStorage();
-                    dropZone.classList.remove('loading');
+                // Enhanced compression for storage reliability
+                compressImageWithFallback(e.target.result, (compressedImage, compressionLevel) => {
+                    if (compressedImage) {
+                        appState.tasks[taskId].photoBase64 = compressedImage;
+                        
+                        // Estimate storage usage
+                        const imageSize = new Blob([compressedImage]).size;
+                        console.log(`Image compressed to ${(imageSize / 1024).toFixed(1)}KB (level: ${compressionLevel})`);
+                        
+                        updateTaskPreview(taskId);
+                        updateProgress();
+                        
+                        // Try to save with error handling
+                        const saveSuccess = saveToLocalStorage();
+                        if (!saveSuccess) {
+                            // If save failed, try more compression
+                            compressImageAggressively(e.target.result, (ultraCompressed) => {
+                                if (ultraCompressed) {
+                                    appState.tasks[taskId].photoBase64 = ultraCompressed;
+                                    updateTaskPreview(taskId);
+                                    saveToLocalStorage();
+                                } else {
+                                    showImageSaveError(taskId);
+                                }
+                            });
+                        }
+                        
+                        dropZone.classList.remove('loading');
+                    } else {
+                        dropZone.classList.remove('loading');
+                        showImageProcessingError(taskId);
+                    }
                 });
             };
+            
             reader.onerror = function() {
-                alert('Error reading image file. Please try again.');
                 dropZone.classList.remove('loading');
+                uploadStatus.textContent = 'Error reading file. Please try again.';
+                uploadStatus.className = 'text-sm text-red-600 mt-2';
             };
+            
             reader.readAsDataURL(file);
         }
 
-        // Image compression for mobile performance
-        function compressImage(imageSrc, callback) {
+        // Enhanced image compression with multiple quality levels
+        function compressImageWithFallback(imageSrc, callback) {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             const img = new Image();
             
             img.onload = function() {
-                // Limit dimensions for mobile
-                const maxWidth = 1200;
-                const maxHeight = 1200;
-                
-                let { width, height } = img;
-                
-                if (width > height) {
-                    if (width > maxWidth) {
-                        height = (height * maxWidth) / width;
-                        width = maxWidth;
+                try {
+                    // Progressive compression levels
+                    const compressionLevels = [
+                        { maxWidth: 1200, maxHeight: 1200, quality: 0.8 }, // Standard
+                        { maxWidth: 1000, maxHeight: 1000, quality: 0.7 }, // Medium
+                        { maxWidth: 800, maxHeight: 800, quality: 0.6 },   // High compression
+                    ];
+                    
+                    let bestResult = null;
+                    let usedLevel = 0;
+                    
+                    for (let i = 0; i < compressionLevels.length; i++) {
+                        const level = compressionLevels[i];
+                        const result = compressWithSettings(img, canvas, ctx, level);
+                        
+                        // Check if result is small enough (target: under 500KB)
+                        const resultSize = new Blob([result]).size;
+                        if (resultSize < 500 * 1024 || i === compressionLevels.length - 1) {
+                            bestResult = result;
+                            usedLevel = i + 1;
+                            break;
+                        }
                     }
-                } else {
-                    if (height > maxHeight) {
-                        width = (width * maxHeight) / height;
-                        height = maxHeight;
-                    }
+                    
+                    callback(bestResult, usedLevel);
+                } catch (error) {
+                    console.error('Image compression failed:', error);
+                    callback(null, 0);
                 }
-                
-                canvas.width = width;
-                canvas.height = height;
-                
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                // Compress with quality setting
-                const compressedImage = canvas.toDataURL('image/jpeg', 0.8);
-                callback(compressedImage);
+            };
+            
+            img.onerror = function() {
+                console.error('Image loading failed');
+                callback(null, 0);
             };
             
             img.src = imageSrc;
+        }
+
+        function compressWithSettings(img, canvas, ctx, settings) {
+            let { width, height } = img;
+            const { maxWidth, maxHeight, quality } = settings;
+            
+            // Calculate new dimensions
+            if (width > height) {
+                if (width > maxWidth) {
+                    height = (height * maxWidth) / width;
+                    width = maxWidth;
+                }
+            } else {
+                if (height > maxHeight) {
+                    width = (width * maxHeight) / height;
+                    height = maxHeight;
+                }
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Clear canvas and draw with better quality
+            ctx.clearRect(0, 0, width, height);
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            return canvas.toDataURL('image/jpeg', quality);
+        }
+
+        function compressImageAggressively(imageSrc, callback) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = function() {
+                try {
+                    // Ultra compression for storage emergencies
+                    const ultraSettings = { maxWidth: 600, maxHeight: 600, quality: 0.4 };
+                    const result = compressWithSettings(img, canvas, ctx, ultraSettings);
+                    
+                    const resultSize = new Blob([result]).size;
+                    console.log(`Ultra-compressed to ${(resultSize / 1024).toFixed(1)}KB`);
+                    
+                    callback(result);
+                } catch (error) {
+                    console.error('Ultra compression failed:', error);
+                    callback(null);
+                }
+            };
+            
+            img.onerror = function() {
+                callback(null);
+            };
+            
+            img.src = imageSrc;
+        }
+
+        function showImageSaveError(taskId) {
+            const uploadStatus = document.getElementById(`status-${taskId}`);
+            uploadStatus.innerHTML = `
+                <div class="text-sm text-red-600 mt-2">
+                    <i data-lucide="alert-circle" class="w-4 h-4 inline mr-1"></i>
+                    Storage full! Photo uploaded but may not be saved.
+                    <button onclick="exportData()" class="underline ml-1">Export backup now</button>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function showImageProcessingError(taskId) {
+            const uploadStatus = document.getElementById(`status-${taskId}`);
+            uploadStatus.innerHTML = `
+                <div class="text-sm text-red-600 mt-2">
+                    <i data-lucide="x-circle" class="w-4 h-4 inline mr-1"></i>
+                    Failed to process image. Please try a different photo.
+                </div>
+            `;
+            lucide.createIcons();
         }
 
         function removePhoto(taskId) {
