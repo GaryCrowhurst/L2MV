@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Evidence Tracker">
+    <title>Level 2 Light Vehicle Photo Evidence Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+        /* Mobile-first responsive design */
+        body {
+            -webkit-overflow-scrolling: touch;
+            -webkit-text-size-adjust: 100%;
+        }
+        
+        .unit-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease-out;
+        }
+        .unit-content.expanded {
+            max-height: none;
+            overflow: visible;
+        }
+        
+        /* Mobile-optimized progress bar */
+        .progress-bar {
+            transition: width 0.3s ease-out;
+            min-height: 8px;
+        }
+        
+        /* Mobile-friendly scrollable areas */
+        .chassis-tasks {
+            max-height: 70vh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        /* Enhanced drag and drop for mobile */
+        .drop-zone {
+            transition: all 0.3s ease;
+            border: 2px dashed #d1d5db;
+            border-radius: 12px;
+            background: #f9fafb;
+            min-height: 120px;
+            position: relative;
+            cursor: pointer;
+        }
+        .drop-zone.drag-over {
+            border-color: #3b82f6;
+            background: #eff6ff;
+            transform: scale(1.02);
+        }
+        .drop-zone.has-file {
+            border-color: #10b981;
+            background: #f0fdf4;
+        }
+        
+        /* Mobile-optimized photo preview */
+        .photo-preview-container {
+            position: relative;
+            display: block;
+            width: 100%;
+            max-width: 300px;
+            margin: 0 auto;
+        }
+        .photo-preview-container img {
+            width: 100%;
+            height: auto;
+            max-height: 200px;
+            object-fit: cover;
+            border-radius: 8px;
+        }
+        
+        /* Touch-friendly action buttons */
+        .photo-actions {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            display: flex;
+            gap: 8px;
+        }
+        .photo-action-btn {
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: manipulation;
+        }
+        .photo-action-btn:hover {
+            background: rgba(0, 0, 0, 0.9);
+            transform: scale(1.1);
+        }
+        
+        /* Auto-save indicator - mobile positioned */
+        .save-indicator {
+            position: fixed;
+            top: 80px;
+            right: 16px;
+            background: #10b981;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .save-indicator.show {
+            opacity: 1;
+        }
+        
+        /* Mobile-optimized search */
+        .search-highlight {
+            background-color: #fef3c7;
+            border-radius: 4px;
+            padding: 2px 4px;
+        }
+        
+        /* Touch-friendly buttons */
+        .btn-mobile {
+            min-height: 44px;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        /* Mobile navigation improvements */
+        .filter-btn {
+            touch-action: manipulation;
+            min-height: 40px;
+            padding: 8px 16px;
+            white-space: nowrap;
+        }
+        .filter-btn.active {
+            background: #3b82f6 !important;
+            color: white !important;
+        }
+        
+        /* iOS specific fixes */
+        input[type="file"] {
+            font-size: 16px; /* Prevents zoom on iOS */
+        }
+        
+        /* Better mobile spacing */
+        @media (max-width: 768px) {
+            .container-mobile {
+                padding: 8px;
+            }
+            .card-mobile {
+                margin-bottom: 12px;
+                border-radius: 12px;
+            }
+            .text-mobile-sm {
+                font-size: 14px;
+                line-height: 1.4;
+            }
+            .grid-mobile {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+        }
+        
+        /* Swipe indicators */
+        .swipe-hint {
+            background: linear-gradient(90deg, transparent 0%, #3b82f6 50%, transparent 100%);
+            height: 3px;
+            width: 40px;
+            border-radius: 2px;
+            margin: 8px auto;
+            opacity: 0.6;
+        }
+        
+        /* Loading states for mobile */
+        .loading {
+            pointer-events: none;
+            opacity: 0.6;
+        }
+        
+        /* Better mobile keyboard handling */
+        .input-container {
+            position: relative;
+        }
+        .input-container.focused {
+            z-index: 100;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-50">
+    <!-- Auto-save Indicator -->
+    <div id="save-indicator" class="save-indicator">
+        <i data-lucide="check" class="w-3 h-3 inline mr-1"></i>
+        Saved
+    </div>
+
+    <!-- Mobile-Optimized Header -->
+    <header class="bg-blue-600 text-white p-4 shadow-lg sticky top-0 z-40">
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-xl md:text-2xl font-bold flex items-center">
+                <i data-lucide="camera" class="w-5 h-5 md:w-6 md:h-6 mr-2"></i>
+                <span class="hidden sm:inline">Level 2 Light Vehicle </span>Evidence Tracker
+            </h1>
+            <p class="text-blue-100 mt-1 text-sm">
+                Core Units & Chassis Pathway
+            </p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-4xl mx-auto container-mobile">
+        <!-- Learner Name Input -->
+        <div class="mb-4 p-4 bg-white rounded-lg shadow-sm border card-mobile">
+            <label for="learner-name" class="block text-lg font-semibold text-gray-800 mb-3">
+                <i data-lucide="user" class="w-5 h-5 inline mr-2"></i>
+                Learner Name
+            </label>
+            <div class="input-container">
+                <input 
+                    type="text" 
+                    id="learner-name" 
+                    placeholder="Enter your full name here..."
+                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base btn-mobile"
+                    onchange="updateLearnerName(this.value)"
+                    oninput="updateLearnerName(this.value)"
+                    onfocus="handleInputFocus(this)"
+                    onblur="handleInputBlur(this)"
+                />
+            </div>
+            <p class="text-sm text-gray-600 mt-2">This name will appear on your evidence portfolio PDF</p>
+        </div>
+
+        <!-- Mobile-Optimized Search and Filter -->
+        <div class="mb-4 p-4 bg-white rounded-lg shadow-sm border card-mobile">
+            <div class="space-y-4">
+                <div>
+                    <label for="search-tasks" class="block text-sm font-semibold text-gray-700 mb-2">
+                        <i data-lucide="search" class="w-4 h-4 inline mr-2"></i>
+                        Search Tasks
+                    </label>
+                    <div class="input-container">
+                        <input 
+                            type="text" 
+                            id="search-tasks" 
+                            placeholder="Search tasks..."
+                            class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base btn-mobile"
+                            oninput="searchTasks(this.value)"
+                            onfocus="handleInputFocus(this)"
+                            onblur="handleInputBlur(this)"
+                        />
+                    </div>
+                </div>
+                
+                <!-- Mobile-friendly filter buttons -->
+                <div class="flex gap-2 overflow-x-auto pb-2">
+                    <button onclick="filterTasks('all')" class="filter-btn active bg-blue-600 text-white rounded-lg flex-shrink-0">All Tasks</button>
+                    <button onclick="filterTasks('completed')" class="filter-btn bg-gray-200 text-gray-700 hover:bg-gray-300 rounded-lg flex-shrink-0">Completed</button>
+                    <button onclick="filterTasks('pending')" class="filter-btn bg-gray-200 text-gray-700 hover:bg-gray-300 rounded-lg flex-shrink-0">Pending</button>
+                    <button onclick="clearSearch()" class="filter-btn bg-red-100 text-red-700 hover:bg-red-200 rounded-lg flex-shrink-0">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile-Optimized Data Management -->
+        <div class="mb-4 p-4 bg-white rounded-lg shadow-sm border card-mobile">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">
+                <i data-lucide="database" class="w-5 h-5 inline mr-2"></i>
+                Data Backup
+            </h3>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <button onclick="exportData()" class="btn-mobile flex items-center justify-center px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                    <i data-lucide="download" class="w-4 h-4 mr-2"></i>
+                    Export
+                </button>
+                <label class="btn-mobile flex items-center justify-center px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer">
+                    <i data-lucide="upload" class="w-4 h-4 mr-2"></i>
+                    Import
+                    <input type="file" accept=".json" class="hidden" onchange="importData(this.files[0])">
+                </label>
+                <button onclick="clearAllData()" class="btn-mobile flex items-center justify-center px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+                    <i data-lucide="trash-2" class="w-4 h-4 mr-2"></i>
+                    Clear All
+                </button>
+            </div>
+            <p class="text-xs text-gray-600 mt-3">
+                💡 Export regularly to prevent data loss
+            </p>
+        </div>
+
+        <!-- Progress Section - Mobile Optimized -->
+        <div id="progress-section" class="mb-4 p-4 bg-white rounded-lg shadow-sm border card-mobile">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-lg font-semibold text-gray-800">Progress</h2>
+                <span id="progress-text" class="text-sm font-medium text-blue-600">
+                    0 of 35 tasks
+                </span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-3 mb-2">
+                <div id="progress-bar" class="bg-blue-600 h-3 rounded-full progress-bar" style="width: 0%"></div>
+            </div>
+            <p id="progress-percentage" class="text-center text-sm text-gray-600 mb-4">0% Complete</p>
+            
+            <!-- Section Progress - Mobile Grid -->
+            <div id="section-progress" class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                <!-- Will be populated by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Units List -->
+        <div id="units-container" class="space-y-4">
+            <!-- Units will be dynamically generated here -->
+        </div>
+
+        <!-- Mobile-Optimized PDF Download -->
+        <div class="mt-6 p-4 bg-white rounded-lg shadow-sm border card-mobile">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">Download Evidence Package</h3>
+            <p class="text-sm text-gray-600 mb-4">
+                Download your portfolio anytime. PDF includes your name and all completed tasks with photos.
+            </p>
+            
+            <button id="download-pdf" class="w-full btn-mobile flex items-center justify-center px-6 py-4 rounded-lg font-medium transition-colors bg-blue-600 text-white hover:bg-blue-700 text-lg">
+                <i data-lucide="download" class="w-5 h-5 mr-2"></i>
+                Download Evidence PDF
+            </button>
+            
+            <p id="download-status" class="text-sm text-gray-600 mt-3 text-center">
+                Available anytime, even with partial completion
+            </p>
+        </div>
+
+        <!-- Mobile spacing -->
+        <div class="h-8"></div>
+    </main>
+
+    <script>
+        // Application State
+        let appState = {
+            learnerName: '',
+            tasks: {},
+            searchTerm: '',
+            activeFilter: 'all',
+            isMobile: window.innerWidth < 768
+        };
+
+        // Mobile-specific utilities
+        function isMobileDevice() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        }
+
+        function handleInputFocus(input) {
+            if (isMobileDevice()) {
+                input.parentElement.classList.add('focused');
+                // Scroll into view on mobile
+                setTimeout(() => {
+                    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 300);
+            }
+        }
+
+        function handleInputBlur(input) {
+            input.parentElement.classList.remove('focused');
+        }
+
+        // Auto-save with mobile feedback
+        function showSaveIndicator() {
+            const indicator = document.getElementById('save-indicator');
+            indicator.classList.add('show');
+            // Haptic feedback on mobile
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+            setTimeout(() => {
+                indicator.classList.remove('show');
+            }, 2000);
+        }
+
+        // Units Data
+        const UNITS_DATA = [
+            {
+                code: '4290-001',
+                title: 'Skills in Health, Safety & Good Housekeeping',
+                tasks: [
+                    {
+                        id: '001-A',
+                        label: 'Wearing Correct PPE',
+                        description: 'Photo of me wearing proper safety goggles, gloves, and safety boots in the workshop.',
+                        uploadLabel: 'Upload Photo – Me Wearing PPE',
+                        crossRef: 'Required for ALL tasks - referenced in Tasks 104-A10, 104-C6, and fabrication work'
+                    },
+                    {
+                        id: '001-B', 
+                        label: 'Vehicle Supported Safely',
+                        description: 'Photo of me properly supporting the vehicle with wheel chocks, hydraulic jack under correct lift point, and jack stands.',
+                        uploadLabel: 'Upload Photo – Me Setting Up Vehicle Support',
+                        crossRef: 'Essential for Tasks 104-A1, 104-B1 and all chassis work'
+                    },
+                    {
+                        id: '001-C',
+                        label: 'Clear, Clean Workspace', 
+                        description: 'Photo of my tidy work area with no rags on floor, no oil spills, and tools organised on bench.',
+                        uploadLabel: 'Upload Photo – My Clean Workshop'
+                    }
+                ]
+            },
+            {
+                code: '4290-004',
+                title: 'Skills in Materials, Fabrication, Tools & Measuring Devices',
+                tasks: [
+                    {
+                        id: '004-A',
+                        label: 'Select Correct Measuring Tool',
+                        description: 'Photo of me holding appropriate measuring device (vernier calliper or micrometer) next to reference dimension block.',
+                        uploadLabel: 'Upload Photo – Me Selecting Tools',
+                        crossRef: 'Used in brake disc measurement (Task 004-B) and chassis work'
+                    },
+                    {
+                        id: '004-B',
+                        label: 'Measuring a Sample Component',
+                        description: 'Photo of me measuring cylinder bore or brake disc thickness with calliper – showing jaws on surface with digital readout visible.',
+                        uploadLabel: 'Upload Photo – Me Taking Measurements',
+                        crossRef: 'Relates to brake disc work in Tasks 104-A7-1 & 104-A7-2'
+                    },
+                    {
+                        id: '004-C',
+                        label: 'Completed Fabrication Work',
+                        description: 'Photo of my completed fabrication work using tools like pad saw, files, or drill press - showing finished piece and tools used.',
+                        uploadLabel: 'Upload Photo – My Completed Fabrication Work',
+                        crossRef: 'Health & Safety PPE required (see Task 001-A)'
+                    }
+                ]
+            },
+            {
+                code: '4290-101', 
+                title: 'Skills in Routine Light Vehicle Maintenance',
+                tasks: [
+                    {
+                        id: '101-A',
+                        label: 'Oil Level Check',
+                        description: 'Photo of me checking oil level with dipstick pulled out, showing oil level between min/max.',
+                        uploadLabel: 'Upload Photo – Me Checking Oil Level'
+                    },
+                    {
+                        id: '101-B',
+                        label: 'Coolant Level Check', 
+                        description: 'Photo of me checking coolant expansion tank level against marking (engine cold).',
+                        uploadLabel: 'Upload Photo – Me Checking Coolant Level'
+                    },
+                    {
+                        id: '101-C1',
+                        label: 'Replace Oil Filter - Before Removal',
+                        description: 'Photo showing original oil filter still bolted in place before I start work.',
+                        uploadLabel: 'Upload Photo – Oil Filter Before I Remove It'
+                    },
+                    {
+                        id: '101-C2',
+                        label: 'Replace Oil Filter - Removal',
+                        description: 'Photo of me removing old oil filter (wearing gloves with drip tray visible).',
+                        uploadLabel: 'Upload Photo – Me Removing Oil Filter'
+                    },
+                    {
+                        id: '101-C3',
+                        label: 'Replace Oil Filter - Installed',
+                        description: 'Photo of me installing new filter with oil seal lubricated and hand-tightening with wrench.',
+                        uploadLabel: 'Upload Photo – Me Installing New Oil Filter'
+                    }
+                ]
+            },
+            {
+                code: '4290-104',
+                title: 'Skills in Removing & Replacing Light Vehicle Chassis Units & Components',
+                tasks: [
+                    // Brake tasks
+                    {
+                        id: '104-A1',
+                        label: 'Wheel Removed',
+                        description: 'Photo of me using wheel extension bar/wrench to remove lug nuts and take off wheel.',
+                        uploadLabel: 'Upload Photo – Me Removing Wheel',
+                        crossRef: 'Requires vehicle support setup from Task 001-B - used in all chassis work'
+                    },
+                    {
+                        id: '104-A2',
+                        label: 'Calliper Bolt Removal',
+                        description: 'Photo of me using correct socket/ratchet to loosen brake calliper bolts.',
+                        uploadLabel: 'Upload Photo – Me Removing Calliper Bolts'
+                    },
+                    {
+                        id: '104-A3',
+                        label: 'Calliper Swinged Out',
+                        description: 'Photo showing calliper hanging on retaining wire/holder that I set up, with brake hose NOT strained.',
+                        uploadLabel: 'Upload Photo – Calliper Extended by Me'
+                    },
+                    {
+                        id: '104-A4',
+                        label: 'Old Brake Pads Still in Carrier',
+                        description: 'Photo showing worn brake pads still in calliper carrier before I remove them.',
+                        uploadLabel: 'Upload Photo – Old Brake Pads I Need to Replace'
+                    },
+                    {
+                        id: '104-A5',
+                        label: 'New Brake Pads Installed',
+                        description: 'Photo of new brake pads that I have seated in carrier with correct orientation arrow visible.',
+                        uploadLabel: 'Upload Photo – New Brake Pads I Installed'
+                    },
+                    {
+                        id: '104-A6',
+                        label: 'Compress Calliper Piston',
+                        description: 'Photo of me using piston-compression tool or C-clamp to compress calliper piston back fully.',
+                        uploadLabel: 'Upload Photo – Me Compressing Calliper Piston'
+                    },
+                    {
+                        id: '104-A7-1',
+                        label: 'Old Disc Removal',
+                        description: 'Photo of me pulling old disc off hub (if rusted, showing me removing screws).',
+                        uploadLabel: 'Upload Photo – Me Removing Old Disc'
+                    },
+                    {
+                        id: '104-A7-2',
+                        label: 'New Disc Fitted',
+                        description: 'Photo of new disc that I have seated flush on hub splines.',
+                        uploadLabel: 'Upload Photo – New Disc I Fitted'
+                    },
+                    {
+                        id: '104-A8',
+                        label: 'Calliper Re-mounted & Bolts Torqued',
+                        description: 'Photo of me with calliper bolted back on, using torque wrench on bolt at correct torque value.',
+                        uploadLabel: 'Upload Photo – Me Reinstalling Calliper with Torque Wrench',
+                        crossRef: 'Torque wrench technique from Tools unit - see measuring tools Tasks 004-A & 004-B'
+                    },
+                    {
+                        id: '104-A9',
+                        label: 'Final Brake System Inspection',
+                        description: 'Photo of me doing final check with wheel back on (hand-tightened lug nuts), applying final torque to one lug nut.',
+                        uploadLabel: 'Upload Photo – Me Doing Final Brake Check'
+                    },
+                    {
+                        id: '104-A10',
+                        label: 'H&S for Brakes',
+                        description: 'Photo of me wearing proper dust mask and gloves, with brake cleaner can and drip tray visible in work area.',
+                        uploadLabel: 'Upload Photo – Me Following Brake Safety Procedures',
+                        crossRef: 'PPE from Task 001-A plus brake-specific safety - dust mask essential'
+                    },
+                    // Suspension tasks
+                    {
+                        id: '104-B1',
+                        label: 'Vehicle Lifted & Supported',
+                        description: 'Photo of me properly lifting and supporting vehicle with jack stands under correct strut mount/axle location and wheel chocks in place.',
+                        uploadLabel: 'Upload Photo – Me Setting Up Vehicle Lift & Support'
+                    },
+                    {
+                        id: '104-B2',
+                        label: 'Shock Absorber Top Nut Removal',
+                        description: 'Photo of me using spanner/socket to undo top nut, with spring support tool engaged.',
+                        uploadLabel: 'Upload Photo – Me Removing Shock Top Nut'
+                    },
+                    {
+                        id: '104-B3',
+                        label: 'Remove Old Shock/Strut Assembly',
+                        description: 'Photo of me pulling shock/strut out of lower control arm bracket.',
+                        uploadLabel: 'Upload Photo – Me Removing Old Shock'
+                    },
+                    {
+                        id: '104-B4',
+                        label: 'New Shock Assembly Fitted',
+                        description: 'Photo of new shock/strut that I have slid into place, with absorber mount aligned.',
+                        uploadLabel: 'Upload Photo – New Shock I Installed'
+                    },
+                    {
+                        id: '104-B5',
+                        label: 'Spring Compressor Use',
+                        description: 'Photo of me safely compressing coil spring with spring compressor, keeping hands clear of pinch zones.',
+                        uploadLabel: 'Upload Photo – Me Using Spring Compressor Safely'
+                    },
+                    {
+                        id: '104-B6',
+                        label: 'Torque Top Nut to Spec',
+                        description: 'Photo of me using torque wrench on strut top nut with digital/analogue value visible.',
+                        uploadLabel: 'Upload Photo – Me Torquing Strut Top Nut',
+                        crossRef: 'Torque wrench technique - also used in Tasks 104-A8 & 104-C4'
+                    },
+                    {
+                        id: '104-B7',
+                        label: 'Final Suspension Check',
+                        description: 'Photo of my completed work with wheel reinstalled, suspension clearances visible, and no loose tools or debris under car.',
+                        uploadLabel: 'Upload Photo – My Final Suspension Check'
+                    },
+                    // Steering tasks
+                    {
+                        id: '104-C1',
+                        label: 'Steering Rack Inspection',
+                        description: 'Photo of me using inspection mirror under vehicle to check for leaks or rack damage.',
+                        uploadLabel: 'Upload Photo – Me Inspecting Steering Rack'
+                    },
+                    {
+                        id: '104-C2',
+                        label: 'Track-Rod End Disconnected',
+                        description: 'Photo of me separating Track-Rod end from steering knuckle using ball joint separator or puller.',
+                        uploadLabel: 'Upload Photo – Me Removing Track-Rod End'
+                    },
+                    {
+                        id: '104-C3',
+                        label: 'New Track-Rod End Fitted',
+                        description: 'Photo showing new Track-Rod end that I have threaded into place on rack, with lock nut finger-tight.',
+                        uploadLabel: 'Upload Photo – New Track-Rod End I Installed'
+                    },
+                    {
+                        id: '104-C4',
+                        label: 'Track-Rod End Torqued & Checked',
+                        description: 'Photo of me using torque wrench on Track-Rod lock nut at correct torque value.',
+                        uploadLabel: 'Upload Photo – Me Torquing Track-Rod Lock Nut',
+                        crossRef: 'Torque wrench technique - also used in Tasks 104-A8 & 104-B6'
+                    },
+                    {
+                        id: '104-C5',
+                        label: 'Final Steering System Check',
+                        description: 'Photo of me checking steering with front wheels on chocks, turning steering wheel to show free play within specification.',
+                        uploadLabel: 'Upload Photo – Me Checking Steering Free Play'
+                    },
+                    {
+                        id: '104-C6',
+                        label: 'H&S for Steering',
+                        description: 'Photo showing me wearing proper gloves and safety boots, with floor clean and no trip hazards under steering area.',
+                        uploadLabel: 'Upload Photo – Me Following Steering Safety Procedures',
+                        crossRef: 'PPE from Task 001-A plus steering-specific safety - clean workspace essential'
+                    }
+                ]
+            }
+        ];
+
+        // Utility Functions
+        function getTotalTasks() {
+            return UNITS_DATA.reduce((total, unit) => total + unit.tasks.length, 0);
+        }
+
+        function getCompletedTasks() {
+            return Object.values(appState.tasks).filter(task => 
+                task.completed && (task.photoFile || task.photoBase64)
+            ).length;
+        }
+
+        function getSectionProgress() {
+            const sections = {
+                safety: { name: '🛡️ Safety', tasks: [], completed: 0 },
+                maintenance: { name: '🔧 Maintenance', tasks: [], completed: 0 },
+                chassis: { name: '🚗 Chassis', tasks: [], completed: 0 }
+            };
+
+            UNITS_DATA.forEach(unit => {
+                unit.tasks.forEach(task => {
+                    const taskData = appState.tasks[task.id];
+                    const isCompleted = taskData?.completed && (taskData.photoFile || taskData.photoBase64);
+                    
+                    if (unit.code === '4290-001' || unit.code === '4290-004') {
+                        sections.safety.tasks.push(task);
+                        if (isCompleted) sections.safety.completed++;
+                    } else if (unit.code === '4290-101') {
+                        sections.maintenance.tasks.push(task);
+                        if (isCompleted) sections.maintenance.completed++;
+                    } else if (unit.code === '4290-104') {
+                        sections.chassis.tasks.push(task);
+                        if (isCompleted) sections.chassis.completed++;
+                    }
+                });
+            });
+
+            return sections;
+        }
+
+        function saveToLocalStorage() {
+            const stateToSave = {
+                learnerName: appState.learnerName,
+                tasks: {}
+            };
+            
+            for (const [taskId, taskData] of Object.entries(appState.tasks)) {
+                stateToSave.tasks[taskId] = {
+                    completed: taskData.completed,
+                    fileName: taskData.fileName || null,
+                    photoBase64: taskData.photoBase64 || null
+                };
+            }
+            
+            try {
+                localStorage.setItem('photoEvidenceState', JSON.stringify(stateToSave));
+                showSaveIndicator();
+            } catch (error) {
+                console.error('Error saving to localStorage:', error);
+                alert('Error saving data. Storage may be full.');
+            }
+        }
+
+        function loadFromLocalStorage() {
+            const saved = localStorage.getItem('photoEvidenceState');
+            if (saved) {
+                try {
+                    const parsedState = JSON.parse(saved);
+                    
+                    appState.learnerName = parsedState.learnerName || '';
+                    const nameInput = document.getElementById('learner-name');
+                    if (nameInput) {
+                        nameInput.value = appState.learnerName;
+                    }
+                    
+                    for (const [taskId, taskData] of Object.entries(parsedState.tasks || {})) {
+                        appState.tasks[taskId] = {
+                            completed: taskData.completed || false,
+                            photoFile: null,
+                            photoBase64: taskData.photoBase64 || null,
+                            fileName: taskData.fileName || null
+                        };
+                        
+                        if (taskData.photoBase64) {
+                            updateTaskPreview(taskId);
+                        }
+                    }
+                    updateProgress();
+                } catch (error) {
+                    console.error('Error loading from localStorage:', error);
+                }
+            }
+        }
+
+        // UI Update Functions
+        function updateProgress() {
+            const total = getTotalTasks();
+            const completed = getCompletedTasks();
+            const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+            document.getElementById('progress-text').textContent = `${completed} of ${total} tasks`;
+            document.getElementById('progress-bar').style.width = `${percentage}%`;
+            document.getElementById('progress-percentage').textContent = `${percentage}% Complete`;
+
+            // Update section progress
+            const sections = getSectionProgress();
+            const progressContainer = document.getElementById('section-progress');
+            progressContainer.innerHTML = Object.values(sections).map(section => {
+                const sectionPercentage = section.tasks.length > 0 ? Math.round((section.completed / section.tasks.length) * 100) : 0;
+                return `
+                    <div class="bg-gray-50 p-3 rounded-lg">
+                        <div class="text-xs font-medium text-gray-700 mb-1">${section.name}</div>
+                        <div class="text-sm font-semibold text-gray-800">${section.completed}/${section.tasks.length}</div>
+                        <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
+                            <div class="bg-blue-600 h-2 rounded-full" style="width: ${sectionPercentage}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Update download button
+            const downloadBtn = document.getElementById('download-pdf');
+            const downloadStatus = document.getElementById('download-status');
+            
+            downloadBtn.disabled = false;
+            
+            if (completed === total) {
+                downloadStatus.textContent = 'All tasks complete! Full evidence portfolio ready.';
+                downloadStatus.className = 'text-sm text-green-600 mt-3 text-center';
+            } else if (completed > 0) {
+                downloadStatus.textContent = `${completed} tasks completed. Partial portfolio available.`;
+                downloadStatus.className = 'text-sm text-blue-600 mt-3 text-center';
+            } else {
+                downloadStatus.textContent = 'Available anytime, even with partial completion';
+                downloadStatus.className = 'text-sm text-gray-600 mt-3 text-center';
+            }
+        }
+
+        function updateTaskPreview(taskId) {
+            const previewImg = document.getElementById(`preview-${taskId}`);
+            const uploadStatus = document.getElementById(`status-${taskId}`);
+            const checkbox = document.getElementById(`complete-${taskId}`);
+            const dropZone = document.getElementById(`drop-${taskId}`);
+            
+            const taskData = appState.tasks[taskId];
+            
+            if (taskData && (taskData.photoFile || taskData.photoBase64)) {
+                const imageUrl = taskData.photoFile 
+                    ? URL.createObjectURL(taskData.photoFile)
+                    : taskData.photoBase64;
+                    
+                if (imageUrl) {
+                    previewImg.src = imageUrl;
+                    previewImg.style.display = 'block';
+                    
+                    const fileName = taskData.fileName || taskData.photoFile?.name || 'image.jpg';
+                    uploadStatus.innerHTML = `<i data-lucide="check" class="w-4 h-4 mr-1"></i>${fileName}`;
+                    uploadStatus.className = 'text-sm text-green-600 flex items-center mt-2';
+                    checkbox.disabled = false;
+                    dropZone.classList.add('has-file');
+                    
+                    lucide.createIcons();
+                }
+            } else {
+                previewImg.style.display = 'none';
+                uploadStatus.textContent = '';
+                checkbox.disabled = true;
+                checkbox.checked = false;
+                dropZone.classList.remove('has-file');
+                if (appState.tasks[taskId]) {
+                    appState.tasks[taskId].completed = false;
+                }
+            }
+        }
+
+        // Event Handlers
+        function updateLearnerName(name) {
+            appState.learnerName = name.trim();
+            saveToLocalStorage();
+        }
+
+        // Enhanced file upload with mobile camera support
+        function handleFileUpload(taskId, file) {
+            if (!file || !file.type.startsWith('image/')) {
+                alert('Please select a valid image file.');
+                return;
+            }
+
+            // Check file size (mobile consideration - 10MB limit)
+            if (file.size > 10 * 1024 * 1024) {
+                alert('Image too large. Please choose an image smaller than 10MB.');
+                return;
+            }
+
+            if (!appState.tasks[taskId]) {
+                appState.tasks[taskId] = { completed: false, photoFile: null, photoBase64: null, fileName: null };
+            }
+            
+            appState.tasks[taskId].photoFile = file;
+            appState.tasks[taskId].fileName = file.name;
+            appState.tasks[taskId].completed = false;
+            
+            // Show loading state
+            const dropZone = document.getElementById(`drop-${taskId}`);
+            dropZone.classList.add('loading');
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                // Compress image for mobile performance
+                compressImage(e.target.result, (compressedImage) => {
+                    appState.tasks[taskId].photoBase64 = compressedImage;
+                    updateTaskPreview(taskId);
+                    updateProgress();
+                    saveToLocalStorage();
+                    dropZone.classList.remove('loading');
+                });
+            };
+            reader.onerror = function() {
+                alert('Error reading image file. Please try again.');
+                dropZone.classList.remove('loading');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Image compression for mobile performance
+        function compressImage(imageSrc, callback) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = function() {
+                // Limit dimensions for mobile
+                const maxWidth = 1200;
+                const maxHeight = 1200;
+                
+                let { width, height } = img;
+                
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height = (height * maxWidth) / width;
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxHeight) {
+                        width = (width * maxHeight) / height;
+                        height = maxHeight;
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // Compress with quality setting
+                const compressedImage = canvas.toDataURL('image/jpeg', 0.8);
+                callback(compressedImage);
+            };
+            
+            img.src = imageSrc;
+        }
+
+        function removePhoto(taskId) {
+            if (confirm('Remove this photo? You can always upload a new one.')) {
+                if (appState.tasks[taskId]) {
+                    appState.tasks[taskId].photoFile = null;
+                    appState.tasks[taskId].photoBase64 = null;
+                    appState.tasks[taskId].fileName = null;
+                    appState.tasks[taskId].completed = false;
+                }
+                updateTaskPreview(taskId);
+                updateProgress();
+                saveToLocalStorage();
+            }
+        }
+
+        function replacePhoto(taskId) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            if (isMobileDevice()) {
+                input.capture = 'environment'; // Use rear camera on mobile
+            }
+            input.onchange = function(e) {
+                if (e.target.files[0]) {
+                    handleFileUpload(taskId, e.target.files[0]);
+                }
+            };
+            input.click();
+        }
+
+        function toggleTaskComplete(taskId) {
+            const taskData = appState.tasks[taskId];
+            if (!taskData || (!taskData.photoFile && !taskData.photoBase64)) return;
+            
+            taskData.completed = !taskData.completed;
+            updateProgress();
+            saveToLocalStorage();
+        }
+
+        function toggleUnit(unitCode) {
+            const content = document.getElementById(`content-${unitCode}`);
+            const chevron = document.getElementById(`chevron-${unitCode}`);
+            
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                chevron.setAttribute('data-lucide', 'chevron-right');
+            } else {
+                content.classList.add('expanded');
+                chevron.setAttribute('data-lucide', 'chevron-down');
+            }
+            
+            lucide.createIcons();
+        }
+
+        // Search and Filter Functions
+        function searchTasks(searchTerm) {
+            appState.searchTerm = searchTerm.toLowerCase();
+            filterAndDisplayTasks();
+        }
+
+        function filterTasks(filterType) {
+            appState.activeFilter = filterType;
+            
+            // Update filter button states
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active', 'bg-blue-600', 'text-white');
+                btn.classList.add('bg-gray-200', 'text-gray-700');
+            });
+            
+            event.target.classList.add('active', 'bg-blue-600', 'text-white');
+            event.target.classList.remove('bg-gray-200', 'text-gray-700');
+            
+            filterAndDisplayTasks();
+        }
+
+        function clearSearch() {
+            document.getElementById('search-tasks').value = '';
+            appState.searchTerm = '';
+            appState.activeFilter = 'all';
+            
+            // Reset filter buttons
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active', 'bg-blue-600', 'text-white');
+                btn.classList.add('bg-gray-200', 'text-gray-700');
+            });
+            document.querySelector('.filter-btn').classList.add('active', 'bg-blue-600', 'text-white');
+            
+            filterAndDisplayTasks();
+        }
+
+        function filterAndDisplayTasks() {
+            UNITS_DATA.forEach(unit => {
+                const unitElement = document.getElementById(`unit-${unit.code}`);
+                if (!unitElement) return;
+                
+                let visibleTasks = 0;
+                
+                unit.tasks.forEach(task => {
+                    const taskElement = document.getElementById(`task-${task.id}`);
+                    if (!taskElement) return;
+                    
+                    const taskData = appState.tasks[task.id];
+                    const isCompleted = taskData?.completed && (taskData.photoFile || taskData.photoBase64);
+                    
+                    // Apply search filter
+                    const matchesSearch = !appState.searchTerm || 
+                        task.label.toLowerCase().includes(appState.searchTerm) ||
+                        task.description.toLowerCase().includes(appState.searchTerm) ||
+                        unit.code.toLowerCase().includes(appState.searchTerm) ||
+                        unit.title.toLowerCase().includes(appState.searchTerm);
+                    
+                    // Apply completion filter
+                    const matchesFilter = appState.activeFilter === 'all' ||
+                        (appState.activeFilter === 'completed' && isCompleted) ||
+                        (appState.activeFilter === 'pending' && !isCompleted);
+                    
+                    const shouldShow = matchesSearch && matchesFilter;
+                    
+                    if (shouldShow) {
+                        taskElement.style.display = 'block';
+                        visibleTasks++;
+                        
+                        // Highlight search terms
+                        if (appState.searchTerm) {
+                            highlightSearchTerms(taskElement, appState.searchTerm);
+                        } else {
+                            removeHighlights(taskElement);
+                        }
+                    } else {
+                        taskElement.style.display = 'none';
+                    }
+                });
+                
+                // Show/hide unit based on visible tasks
+                if (visibleTasks > 0) {
+                    unitElement.style.display = 'block';
+                    // Auto-expand units with visible tasks when searching
+                    if (appState.searchTerm && !document.getElementById(`content-${unit.code}`).classList.contains('expanded')) {
+                        toggleUnit(unit.code);
+                    }
+                } else {
+                    unitElement.style.display = 'none';
+                }
+            });
+        }
+
+        function highlightSearchTerms(element, searchTerm) {
+            const walker = document.createTreeWalker(
+                element,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+            );
+            
+            const textNodes = [];
+            let node;
+            while (node = walker.nextNode()) {
+                textNodes.push(node);
+            }
+            
+            textNodes.forEach(textNode => {
+                const parent = textNode.parentNode;
+                if (parent.classList && parent.classList.contains('search-highlight')) return;
+                
+                const regex = new RegExp(`(${searchTerm})`, 'gi');
+                const text = textNode.textContent;
+                
+                if (regex.test(text)) {
+                    const highlightedHTML = text.replace(regex, '<span class="search-highlight">$1</span>');
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = highlightedHTML;
+                    
+                    while (wrapper.firstChild) {
+                        parent.insertBefore(wrapper.firstChild, textNode);
+                    }
+                    parent.removeChild(textNode);
+                }
+            });
+        }
+
+        function removeHighlights(element) {
+            const highlights = element.querySelectorAll('.search-highlight');
+            highlights.forEach(highlight => {
+                const parent = highlight.parentNode;
+                parent.replaceChild(document.createTextNode(highlight.textContent), highlight);
+                parent.normalize();
+            });
+        }
+
+        // Data Management Functions
+        function exportData() {
+            try {
+                const exportData = {
+                    learnerName: appState.learnerName,
+                    tasks: appState.tasks,
+                    exportDate: new Date().toISOString(),
+                    version: '2.0'
+                };
+                
+                const dataStr = JSON.stringify(exportData, null, 2);
+                const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(dataBlob);
+                link.download = `evidence_tracker_backup_${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                
+                alert('Backup exported successfully!');
+            } catch (error) {
+                alert('Error exporting data: ' + error.message);
+            }
+        }
+
+        function importData(file) {
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    
+                    if (confirm('Import data? This will replace all current progress.')) {
+                        appState.learnerName = importedData.learnerName || '';
+                        appState.tasks = importedData.tasks || {};
+                        
+                        // Update UI
+                        const nameInput = document.getElementById('learner-name');
+                        if (nameInput) {
+                            nameInput.value = appState.learnerName;
+                        }
+                        
+                        // Update all task previews
+                        Object.keys(appState.tasks).forEach(taskId => {
+                            updateTaskPreview(taskId);
+                        });
+                        
+                        updateProgress();
+                        saveToLocalStorage();
+                        
+                        alert('Data imported successfully!');
+                        
+                        // Refresh the page to ensure clean state
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                } catch (error) {
+                    alert('Error importing data. Please check the file format.');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function clearAllData() {
+            if (confirm('Clear ALL data? This action cannot be undone.\n\nConsider exporting a backup first.')) {
+                if (confirm('Are you absolutely sure? All photos and progress will be lost.')) {
+                    localStorage.removeItem('photoEvidenceState');
+                    appState = {
+                        learnerName: '',
+                        tasks: {},
+                        searchTerm: '',
+                        activeFilter: 'all'
+                    };
+                    
+                    window.location.reload();
+                }
+            }
+        }
+
+        // PDF Generation with mobile optimizations
+        async function generatePDF() {
+            try {
+                // Show loading state
+                const downloadBtn = document.getElementById('download-pdf');
+                const originalText = downloadBtn.innerHTML;
+                downloadBtn.innerHTML = '<i data-lucide="loader" class="w-5 h-5 mr-2 animate-spin"></i>Generating PDF...';
+                downloadBtn.disabled = true;
+                
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF();
+                
+                const completedCount = getCompletedTasks();
+                const totalTasks = getTotalTasks();
+                
+                // Cover page
+                pdf.setFontSize(20);
+                pdf.text('Level 2 Light Vehicle Maintenance & Repair', 20, 30);
+                pdf.setFontSize(16);
+                pdf.text('Photographic Evidence Portfolio', 20, 45);
+                pdf.setFontSize(12);
+                
+                const learnerName = appState.learnerName || 'Name not provided';
+                pdf.text(`Learner Name: ${learnerName}`, 20, 70);
+                pdf.text(`Evidence Photos: ${completedCount} of ${totalTasks}`, 20, 85);
+                pdf.text(`Generated: ${new Date().toLocaleDateString()}`, 20, 100);
+                
+                if (completedCount === totalTasks) {
+                    pdf.setFontSize(10);
+                    pdf.text('✓ Portfolio Complete - All Required Evidence Included', 20, 115);
+                } else {
+                    pdf.setFontSize(10);
+                    pdf.text('⚠ Partial Portfolio - Additional Evidence Required', 20, 115);
+                }
+
+                let currentSection = '';
+                let photoCount = 0;
+                
+                // Process each unit and task
+                for (const unit of UNITS_DATA) {
+                    for (const task of unit.tasks) {
+                        const taskData = appState.tasks[task.id];
+                        
+                        if (taskData?.completed && (taskData.photoBase64 || taskData.photoFile)) {
+                            
+                            // Add section headers for chassis tasks
+                            if (unit.code === '4290-104') {
+                                let sectionTitle = '';
+                                if (task.id === '104-A1' && currentSection !== 'brake') {
+                                    sectionTitle = '🚗 BRAKE SYSTEM - Removal & Replacement';
+                                    currentSection = 'brake';
+                                } else if (task.id === '104-B1' && currentSection !== 'suspension') {
+                                    sectionTitle = '🔧 SUSPENSION SYSTEM - Removal & Replacement';
+                                    currentSection = 'suspension';
+                                } else if (task.id === '104-C1' && currentSection !== 'steering') {
+                                    sectionTitle = '🎯 STEERING SYSTEM - Removal & Replacement';
+                                    currentSection = 'steering';
+                                }
+                                
+                                if (sectionTitle) {
+                                    pdf.addPage();
+                                    pdf.setFontSize(16);
+                                    pdf.text(sectionTitle, 20, 30);
+                                    pdf.setFontSize(12);
+                                    pdf.text(`Unit ${unit.code} - ${unit.title}`, 20, 45);
+                                }
+                            }
+                            
+                            pdf.addPage();
+                            photoCount++;
+                            
+                            try {
+                                let imageData = taskData.photoBase64;
+                                
+                                if (!imageData && taskData.photoFile) {
+                                    const reader = new FileReader();
+                                    imageData = await new Promise((resolve, reject) => {
+                                        reader.onload = (e) => resolve(e.target.result);
+                                        reader.onerror = reject;
+                                        reader.readAsDataURL(taskData.photoFile);
+                                    });
+                                }
+                                
+                                if (imageData) {
+                                    const imgProps = pdf.getImageProperties(imageData);
+                                    const pdfWidth = pdf.internal.pageSize.getWidth() - 40;
+                                    const pdfHeight = pdf.internal.pageSize.getHeight() - 80;
+                                    
+                                    const imgWidth = Math.min(pdfWidth, imgProps.width * 0.5);
+                                    const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
+                                    
+                                    const x = (pdf.internal.pageSize.getWidth() - imgWidth) / 2;
+                                    const y = 20;
+                                    
+                                    pdf.addImage(imageData, 'JPEG', x, y, imgWidth, Math.min(imgHeight, pdfHeight - 40));
+                                    
+                                    const captionY = Math.min(y + imgHeight + 10, pdfHeight);
+                                    pdf.setFontSize(12);
+                                    pdf.text(`Unit ${unit.code} – ${task.label}`, 20, captionY);
+                                    pdf.setFontSize(10);
+                                    pdf.text(task.uploadLabel, 20, captionY + 10);
+                                    
+                                    if (task.crossRef) {
+                                        pdf.setFontSize(8);
+                                        pdf.text(`Cross Reference: ${task.crossRef}`, 20, captionY + 20);
+                                    }
+                                }
+                            } catch (imageError) {
+                                console.error(`Error adding image for task ${task.id}:`, imageError);
+                                pdf.setFontSize(12);
+                                pdf.text(`Unit ${unit.code} – ${task.label}`, 20, 30);
+                                pdf.setFontSize(10);
+                                pdf.text('Error: Image could not be included', 20, 45);
+                            }
+                        }
+                    }
+                }
+
+                const filename = completedCount === totalTasks 
+                    ? 'light_vehicle_evidence_portfolio_complete.pdf'
+                    : `light_vehicle_evidence_portfolio_partial_${completedCount}of${totalTasks}.pdf`;
+                    
+                pdf.save(filename);
+                
+                const nameForMessage = appState.learnerName || 'Learner';
+                alert(`PDF generated successfully for ${nameForMessage}!\n\n📊 Portfolio Status:\n• ${completedCount} tasks completed\n• ${photoCount} photos included\n• File: ${filename}`);
+                
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                alert(`Error generating PDF: ${error.message}\n\nPlease try again or contact support.`);
+            } finally {
+                // Restore button
+                const downloadBtn = document.getElementById('download-pdf');
+                downloadBtn.innerHTML = originalText;
+                downloadBtn.disabled = false;
+                lucide.createIcons();
+            }
+        }
+
+        // Mobile-optimized task creation
+        function createTaskHTML(unit, task) {
+            let sectionHeader = '';
+            if (unit.code === '4290-104') {
+                if (task.id === '104-A1') {
+                    sectionHeader = '<div class="bg-red-50 border-l-4 border-red-400 p-3 mb-4 mt-2 rounded-r-lg"><h4 class="font-semibold text-red-800 flex items-center text-sm"><span class="mr-2">🚗</span>BRAKE SYSTEM</h4><p class="text-xs text-red-600 mt-1">Tasks A1-A10: Brake service, pads, discs, calliper</p></div>';
+                } else if (task.id === '104-B1') {
+                    sectionHeader = '<div class="bg-blue-50 border-l-4 border-blue-400 p-3 mb-4 mt-4 rounded-r-lg"><h4 class="font-semibold text-blue-800 flex items-center text-sm"><span class="mr-2">🔧</span>SUSPENSION SYSTEM</h4><p class="text-xs text-blue-600 mt-1">Tasks B1-B7: Shock/strut replacement, spring work</p></div>';
+                } else if (task.id === '104-C1') {
+                    sectionHeader = '<div class="bg-green-50 border-l-4 border-green-400 p-3 mb-4 mt-4 rounded-r-lg"><h4 class="font-semibold text-green-800 flex items-center text-sm"><span class="mr-2">🎯</span>STEERING SYSTEM</h4><p class="text-xs text-green-600 mt-1">Tasks C1-C6: Track-rod ends, steering rack</p></div>';
+                }
+            }
+
+            return `
+                <div id="task-${task.id}" class="border rounded-lg p-4 mb-4 bg-gray-50 card-mobile">
+                    ${sectionHeader}
+                    <h4 class="font-semibold text-gray-800 mb-2 text-sm md:text-base">${task.label}</h4>
+                    <p class="text-sm text-gray-600 mb-3 text-mobile-sm">${task.description}</p>
+                    ${task.crossRef ? `<p class="text-xs text-blue-600 bg-blue-50 p-2 rounded mb-3"><strong>Cross Reference:</strong> ${task.crossRef}</p>` : ''}
+                    
+                    <div class="space-y-4">
+                        <!-- Mobile-optimized drop zone -->
+                        <div id="drop-${task.id}" class="drop-zone flex flex-col items-center justify-center p-6 cursor-pointer"
+                             ondrop="handleDrop(event, '${task.id}')"
+                             ondragover="handleDragOver(event)"
+                             ondragenter="handleDragEnter(event)"
+                             ondragleave="handleDragLeave(event)"
+                             onclick="openFileSelector('${task.id}')">
+                            <i data-lucide="camera" class="w-8 h-8 text-gray-400 mb-2"></i>
+                            <p class="text-sm font-medium text-gray-700 text-center mb-1">${task.uploadLabel}</p>
+                            <p class="text-xs text-gray-500 text-center">Tap to select or take photo</p>
+                            <input
+                                type="file"
+                                id="file-${task.id}"
+                                accept="image/*"
+                                ${isMobileDevice() ? 'capture="environment"' : ''}
+                                class="hidden"
+                                onchange="handleFileUpload('${task.id}', this.files[0])"
+                            />
+                        </div>
+
+                        <!-- Photo preview with mobile-optimized controls -->
+                        <div id="preview-container-${task.id}" class="photo-preview-container" style="display: none;">
+                            <img
+                                id="preview-${task.id}"
+                                class="w-full rounded-lg border shadow-sm"
+                                style="display: none;"
+                                alt="Preview for ${task.label}"
+                            />
+                            <div class="photo-actions">
+                                <button onclick="replacePhoto('${task.id}')" class="photo-action-btn" title="Replace photo">
+                                    <i data-lucide="camera" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="removePhoto('${task.id}')" class="photo-action-btn" title="Remove photo">
+                                    <i data-lucide="x" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="status-${task.id}" class="text-sm"></div>
+
+                        <!-- Mobile-optimized checkbox -->
+                        <div class="flex items-center space-x-3 p-3 bg-white rounded-lg border">
+                            <input
+                                type="checkbox"
+                                id="complete-${task.id}"
+                                onchange="toggleTaskComplete('${task.id}')"
+                                disabled
+                                class="w-5 h-5 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 disabled:opacity-50"
+                            />
+                            <label
+                                for="complete-${task.id}"
+                                class="text-sm font-medium text-gray-700 flex-1"
+                            >
+                                Mark Task Complete
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Drag and drop handlers for mobile
+        function handleDrop(event) {
+            event.preventDefault();
+            const taskId = event.currentTarget.id.replace('drop-', '');
+            const files = event.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileUpload(taskId, files[0]);
+            }
+            event.currentTarget.classList.remove('drag-over');
+        }
+
+        function handleDragOver(event) {
+            event.preventDefault();
+        }
+
+        function handleDragEnter(event) {
+            event.preventDefault();
+            event.currentTarget.classList.add('drag-over');
+        }
+
+        function handleDragLeave(event) {
+            event.currentTarget.classList.remove('drag-over');
+        }
+
+        function openFileSelector(taskId) {
+            document.getElementById(`file-${taskId}`).click();
+        }
+
+        function createUnitHTML(unit) {
+            const completedCount = unit.tasks.filter(task => 
+                appState.tasks[task.id]?.completed || false
+            ).length;
+
+            const isChassisUnit = unit.code === '4290-104';
+            const tasksContainerClass = isChassisUnit ? 'chassis-tasks' : '';
+
+            return `
+                <div id="unit-${unit.code}" class="bg-white rounded-lg shadow-sm border card-mobile">
+                    <button
+                        onclick="toggleUnit('${unit.code}')"
+                        class="w-full p-4 text-left flex items-center justify-between hover:bg-gray-50 transition-colors btn-mobile rounded-lg"
+                    >
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-gray-800">
+                                Unit ${unit.code}
+                            </h3>
+                            <p class="text-sm text-gray-600 text-mobile-sm">${unit.title}</p>
+                            <p class="text-xs text-blue-600 mt-1">
+                                ${completedCount} of ${unit.tasks.length} tasks completed
+                            </p>
+                            ${isChassisUnit ? '<p class="text-xs text-gray-500 mt-1">⭐ Brakes • Suspension • Steering</p>' : ''}
+                        </div>
+                        <i id="chevron-${unit.code}" data-lucide="chevron-right" class="w-5 h-5 text-gray-500 flex-shrink-0"></i>
+                    </button>
+                    
+                    <div id="content-${unit.code}" class="unit-content ${unit.code === '4290-001' ? 'expanded' : ''}">
+                        <div class="px-4 pb-4">
+                            ${isChassisUnit ? '<div class="swipe-hint"></div>' : ''}
+                            ${isChassisUnit ? '<div class="mb-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg"><h4 class="font-medium text-yellow-800 mb-2 text-sm">📋 Chassis Sections:</h4><div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-yellow-700"><div>🚗 <strong>Brakes:</strong> A1-A10</div><div>🔧 <strong>Suspension:</strong> B1-B7</div><div>🎯 <strong>Steering:</strong> C1-C6</div></div></div>' : ''}
+                            <div class="${tasksContainerClass}">
+                                <div class="space-y-3">
+                                    ${unit.tasks.map(task => createTaskHTML(unit, task)).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Initialize App
+        function initializeApp() {
+            // Detect mobile
+            appState.isMobile = isMobileDevice();
+            
+            // Load saved state
+            loadFromLocalStorage();
+
+            // Generate units HTML
+            const unitsContainer = document.getElementById('units-container');
+            unitsContainer.innerHTML = UNITS_DATA.map(unit => createUnitHTML(unit)).join('');
+
+            // Set first unit as expanded
+            const firstChevron = document.getElementById('chevron-4290-001');
+            if (firstChevron) {
+                firstChevron.setAttribute('data-lucide', 'chevron-down');
+            }
+
+            // Initialize Lucide icons
+            lucide.createIcons();
+
+            // Update initial progress
+            updateProgress();
+
+            // Add PDF download handler
+            document.getElementById('download-pdf').addEventListener('click', generatePDF);
+            
+            // Update preview containers
+            UNITS_DATA.forEach(unit => {
+                unit.tasks.forEach(task => {
+                    const taskData = appState.tasks[task.id];
+                    if (taskData && (taskData.photoFile || taskData.photoBase64)) {
+                        const previewContainer = document.getElementById(`preview-container-${task.id}`);
+                        if (previewContainer) {
+                            previewContainer.style.display = 'block';
+                        }
+                    }
+                });
+            });
+
+            // Mobile-specific initialization
+            if (appState.isMobile) {
+                // Add touch-friendly class to body
+                document.body.classList.add('mobile-optimized');
+                
+                // Prevent zoom on double tap
+                let lastTouchEnd = 0;
+                document.addEventListener('touchend', function (event) {
+                    const now = (new Date()).getTime();
+                    if (now - lastTouchEnd <= 300) {
+                        event.preventDefault();
+                    }
+                    lastTouchEnd = now;
+                }, false);
+            }
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            appState.isMobile = window.innerWidth < 768;
+        });
+
+        // Start the app when DOM is loaded
+        document.addEventListener('DOMContentLoaded', initializeApp);
+        
+        // Handle orientation change on mobile
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => {
+                updateProgress();
+            }, 500);
+        });
+
+        // Add service worker for offline capability (basic)
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').catch(() => {
+                // Service worker registration failed - no problem for this app
+            });
+        }
+    </script>
+</body>
+</html>
